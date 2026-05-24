@@ -1,12 +1,14 @@
 # Entorno virtual
 env/
 venv/
+.Python
 __pycache__/
+*.pyc
 
 # Credenciales
 .env
 
-# Datos de ejecución
+# Datos de ejecucion
 session_state.json
 data/
 
@@ -14,3 +16,14 @@ data/
 *.log
 error_log.txt
 output_log.txt
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

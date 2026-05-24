@@ -4,3 +4,5 @@ __pycache__/
 *.log
 session_state.json
 data/
+.DS_Store
+Thumbs.db

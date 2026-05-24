@@ -1,4 +1,2 @@
 playwright
 python-dotenv
-flask
-gunicorn
