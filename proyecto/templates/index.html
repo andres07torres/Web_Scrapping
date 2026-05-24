@@ -209,12 +209,12 @@
       } catch (e) {}
     }
 
-    function updateSessionUI(hasSession) {
+    function updateSessionUI(hasSession, cookies) {
       const badge = document.getElementById('session-badge');
       const delBtn = document.getElementById('delete-session-btn');
       if (hasSession) {
         badge.className = 'session-badge session-active';
-        badge.textContent = '● Sesión activa';
+        badge.textContent = '● Sesión activa' + (cookies ? ' (' + cookies + ' cookies)' : '');
         delBtn.style.display = 'inline-block';
         document.getElementById('upload-label').style.display = 'none';
       } else {
@@ -240,7 +240,7 @@
         });
         const data = await res.json();
         if (!res.ok) { setStatus(data.error, 'error'); return; }
-        updateSessionUI(true);
+        updateSessionUI(true, data.cookies);
         setStatus(data.message, 'success');
       } catch (e) {
         setStatus('Error al subir la sesión', 'error');

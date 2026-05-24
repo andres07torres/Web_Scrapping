@@ -199,12 +199,20 @@ def upload_session():
         return jsonify({"error": "Debe ser un archivo .json"}), 400
     try:
         content = file.read().decode("utf-8")
-        json.loads(content)
+        data = json.loads(content)
+        cookies = data.get("cookies", [])
+        if not cookies:
+            return jsonify({"error": "El archivo no contiene cookies. Asegúrate de iniciar sesión primero."}), 400
         os.makedirs(os.path.dirname(SESSION_STATE_PATH), exist_ok=True)
         with open(SESSION_STATE_PATH, "w", encoding="utf-8") as f:
             f.write(content)
-        logger.info("Sesión subida correctamente desde %s", request.remote_addr)
-        return jsonify({"success": True, "message": "Sesión cargada correctamente"})
+        logger.info("Sesión subida con %d cookies desde %s", len(cookies), request.remote_addr)
+        moodle_cookies = [c for c in cookies if "unemi" in c.get("domain", "")]
+        return jsonify({
+            "success": True,
+            "cookies": len(cookies),
+            "message": f"Sesión cargada ({len(cookies)} cookies, {len(moodle_cookies)} de Moodle)"
+        })
     except (json.JSONDecodeError, UnicodeDecodeError):
         return jsonify({"error": "El archivo no es un JSON válido"}), 400
 
@@ -212,9 +220,18 @@ def upload_session():
 @app.route("/session-status")
 def session_status():
     exists = os.path.exists(SESSION_STATE_PATH)
+    cookies_count = 0
+    if exists:
+        try:
+            with open(SESSION_STATE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cookies_count = len(data.get("cookies", []))
+        except Exception:
+            pass
     return jsonify({
         "has_session": exists,
-        "message": "Sesión activa" if exists else "No hay sesión guardada"
+        "cookies": cookies_count,
+        "message": f"Sesión activa ({cookies_count} cookies)" if exists else "No hay sesión guardada"
     })
 
 
