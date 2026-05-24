@@ -1,12 +1,5 @@
 """
 Genera data/session_state.json autenticándose manualmente en Moodle.
-
-Uso:
-  cd proyecto
-  python get_session.py
-
-Resuelve el CAPTCHA en el navegador que se abre y luego
-sube data/session_state.json a Render desde la web.
 """
 import os
 import json
@@ -15,7 +8,7 @@ import asyncio
 from playwright.async_api import async_playwright
 
 LOGIN_URL = "https://aulagradob.unemi.edu.ec/login/index.php"
-VERIFY_URL = "https://aulagradob.unemi.edu.ec/my/"
+TARGET_URL = "https://aulagradob.unemi.edu.ec/mod/assign/view.php?id=70708"
 
 
 async def main():
@@ -24,63 +17,80 @@ async def main():
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
-        context = await browser.new_context()
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+        )
         page = await context.new_page()
 
-        print("🔓 Navegador abierto. Ve al login de Moodle...")
-        print("⚠️  Si aparece CAPTCHA, resuélvelo manualmente.")
-        print("⏳ Esperando que inicies sesión...\n")
+        print("")
+        print("⚠️  ⚠️  ⚠️  ATENCIÓN ⚠️  ⚠️  ⚠️")
+        print("Se abrirá una ventana de CHROME NUEVA.")
+        print("NO es tu navegador normal. Debes iniciar sesión AHÍ.")
+        print("Si cierras la ventana sin loguearte, no funcionará.")
+        print("⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️")
+        print("")
+        print()
 
         await page.goto(LOGIN_URL, wait_until="networkidle", timeout=60000)
 
+        print("⏳ Esperando que inicies sesión en la ventana de Playwright...")
+        print("   - Ingresa tus credenciales")
+        print("   - Resuelve el CAPTCHA si aparece")
+        print("   - La sesión se guardará automáticamente\n")
+
         try:
-            # Esperar hasta que desaparezca el formulario de login
             await page.wait_for_function(
-                "!document.querySelector('#username') && !document.querySelector('input[name=\"username\"]')",
+                "!document.querySelector('#username')",
                 timeout=300000
             )
-            print("✅ Inicio de sesión detectado (login ya no visible).")
+            print("✅ Login detectado. Esperando que terminen las redirecciones...")
+            await asyncio.sleep(5)
 
-            # Verificar navegando a una página protegida
-            await page.goto(VERIFY_URL, wait_until="networkidle", timeout=60000)
-            logged_in = await page.locator("#username, input[name='username']").is_visible()
-            if logged_in:
-                print("⚠️  La sesión no es válida. Intenta de nuevo.")
+            if await page.locator("#username").is_visible():
+                print("❌ El login sigue visible. Algo salió mal.")
                 await browser.close()
                 return
 
-            print("✅ Sesión verificada. Guardando cookies...\n")
+            print("✅ Navegando a una actividad para consolidar la sesión...")
+            await page.goto(TARGET_URL, wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(3)
 
-            # Guardar la sesión
+            if await page.locator("#username").is_visible():
+                print("❌ La sesión no es válida (redirigió al login).")
+                await browser.close()
+                return
+
+            print("✅ Sesión verificada en la actividad. Guardando cookies...")
             await context.storage_state(path=session_path)
 
-            # Mostrar resumen del archivo
             with open(session_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            cookies_count = len(data.get("cookies", []))
-            origins_count = len(data.get("origins", []))
 
-            print(f"📁 Archivo: {session_path}")
-            print(f"🍪 Cookies: {cookies_count}")
-            print(f"🌐 Orígenes: {origins_count}")
+            cookies = data.get("cookies", [])
+            moodle_cookies = [c for c in cookies if "unemi" in c.get("domain", "")]
+            session_cookies = [c for c in cookies if "MoodleSession" in c.get("name", "")]
+
+            print(f"\n📊 Resumen de cookies guardadas:")
+            print(f"   Total: {len(cookies)}")
+            print(f"   Dominio unemi: {len(moodle_cookies)}")
+            print(f"   MoodleSession: {len(session_cookies)}")
             print()
 
-            if cookies_count > 0:
-                print("✅ Sesión guardada correctamente.")
-                print("📤 Súbela a Render:")
-                print("   1. Abre https://web-scrapping-fr20.onrender.com/")
-                print("   2. Haz clic en 'Subir session_state.json'")
-                print("   3. Selecciona este archivo")
-                print("   4. Verás '● Sesión activa' en verde ✅")
+            if session_cookies:
+                print(f"✅ LISTO. Archivo guardado en: {session_path}")
+                print(f"📤 Súbelo a Render desde la web.")
             else:
-                print("❌ No se encontraron cookies. La sesión no es válida.")
+                print("❌ No se encontró la cookie MoodleSession.")
+                print("   La sesión no es válida. Intenta de nuevo.")
 
-        except Exception as e:
-            print(f"❌ Error: No se detectó inicio de sesión en 5 minutos.")
-            print("   Ejecuta de nuevo e inicia sesión más rápido.")
+        except Exception:
+            print("❌ Tiempo de espera agotado (5 min). Ejecuta de nuevo.")
 
         await browser.close()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
