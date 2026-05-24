@@ -29,13 +29,22 @@
       <p id="status" class="status">Esperando URL...</p>
       <div class="session-row">
         <span id="session-badge" class="session-badge session-inactive">● Sin sesión</span>
+        <button class="btn primary small" onclick="window.open('https://aulagradob.unemi.edu.ec/login/index.php', '_blank')">Iniciar sesión en Moodle</button>
         <label class="upload-label" id="upload-label">
-          Subir session_state.json
+          Subir cookies (.json)
           <input type="file" id="session-input" accept=".json" hidden onchange="uploadSession(this)">
         </label>
         <button class="btn danger small" id="delete-session-btn" style="display:none" onclick="deleteSession()">Eliminar sesión</button>
       </div>
     </section>
+    <details class="help-box">
+      <summary>❓ ¿Cómo obtener las cookies?</summary>
+      <ol>
+        <li>Haz clic en <strong>"Iniciar sesión en Moodle"</strong> e inicia sesión (resuelve CAPTCHA si aparece).</li>
+        <li>Vuelve aquí y ejecuta en tu PC: <code>python get_session.py</code></li>
+        <li>Sube el archivo <code>data/session_state.json</code> generado.</li>
+      </ol>
+    </details>
 
     <section class="table-section">
       <table id="tasks-table">

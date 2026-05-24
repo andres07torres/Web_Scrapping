@@ -1,14 +1,22 @@
 """
-Genera data/session_state.json autenticándose manualmente en Moodle.
+Genera data/session_state.json usando las cookies de tu CHROME real.
+
+Si ya estás logueado en Moodle en tu Chrome, este script usará
+ESA misma sesión — no necesitas loguearte de nuevo.
+
+Uso:
+  cd proyecto
+  python get_session.py
 """
 import os
 import json
+import sys
 import asyncio
 
 from playwright.async_api import async_playwright
 
-LOGIN_URL = "https://aulagradob.unemi.edu.ec/login/index.php"
-TARGET_URL = "https://aulagradob.unemi.edu.ec/mod/assign/view.php?id=70708"
+CHECK_URL = "https://aulagradob.unemi.edu.ec/my/"
+EXPORT_URL = "https://aulagradob.unemi.edu.ec/mod/assign/view.php?id=70708"
 
 
 async def main():
@@ -16,81 +24,69 @@ async def main():
     os.makedirs(os.path.dirname(session_path), exist_ok=True)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/125.0.0.0 Safari/537.36"
-            ),
+        print("🔓 Abriendo Chrome (tu perfil real)...")
+        print("   Si ya estás logueado en Moodle, las cookies se heredarán.\n")
+
+        browser = await p.chromium.launch(
+            headless=False,
+            channel="chrome",
         )
+        context = await browser.new_context()
         page = await context.new_page()
 
-        print("")
-        print("⚠️  ⚠️  ⚠️  ATENCIÓN ⚠️  ⚠️  ⚠️")
-        print("Se abrirá una ventana de CHROME NUEVA.")
-        print("NO es tu navegador normal. Debes iniciar sesión AHÍ.")
-        print("Si cierras la ventana sin loguearte, no funcionará.")
-        print("⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️")
-        print("")
-        print()
+        await page.goto(CHECK_URL, wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(2)
 
-        await page.goto(LOGIN_URL, wait_until="networkidle", timeout=60000)
+        needs_login = await page.locator("#username, input[name='username']").is_visible()
 
-        print("⏳ Esperando que inicies sesión en la ventana de Playwright...")
-        print("   - Ingresa tus credenciales")
-        print("   - Resuelve el CAPTCHA si aparece")
-        print("   - La sesión se guardará automáticamente\n")
+        if needs_login:
+            print("⚠️  No estás logueado en Moodle en este perfil.")
+            print("👉 Inicia sesión en la ventana de Chrome que se abrió.")
+            print("⏳ Esperando login...\n")
 
-        try:
-            await page.wait_for_function(
-                "!document.querySelector('#username')",
-                timeout=300000
-            )
-            print("✅ Login detectado. Esperando que terminen las redirecciones...")
-            await asyncio.sleep(5)
-
-            if await page.locator("#username").is_visible():
-                print("❌ El login sigue visible. Algo salió mal.")
+            try:
+                await page.wait_for_function(
+                    "!document.querySelector('#username')",
+                    timeout=300000
+                )
+                print("✅ Login detectado.")
+                await asyncio.sleep(3)
+            except Exception:
+                print("❌ Tiempo agotado. Intenta de nuevo.")
                 await browser.close()
                 return
+        else:
+            print("✅ Ya estás logueado en Moodle. Usando sesión existente.\n")
 
-            print("✅ Navegando a una actividad para consolidar la sesión...")
-            await page.goto(TARGET_URL, wait_until="networkidle", timeout=60000)
-            await asyncio.sleep(3)
+        await page.goto(EXPORT_URL, wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(2)
 
-            if await page.locator("#username").is_visible():
-                print("❌ La sesión no es válida (redirigió al login).")
-                await browser.close()
-                return
+        if await page.locator("#username, input[name='username']").is_visible():
+            print("❌ La sesión no es válida (redirigió al login en Moodle).")
+            await browser.close()
+            return
 
-            print("✅ Sesión verificada en la actividad. Guardando cookies...")
-            await context.storage_state(path=session_path)
+        print("✅ Sesión verificada. Guardando cookies...")
+        await context.storage_state(path=session_path)
 
-            with open(session_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        with open(session_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-            cookies = data.get("cookies", [])
-            moodle_cookies = [c for c in cookies if "unemi" in c.get("domain", "")]
-            session_cookies = [c for c in cookies if "MoodleSession" in c.get("name", "")]
+        cookies = data.get("cookies", [])
+        session_cookies = [c for c in cookies if "MoodleSession" in c.get("name", "")]
+        unemi_cookies = [c for c in cookies if "unemi" in c.get("domain", "")]
 
-            print(f"\n📊 Resumen de cookies guardadas:")
-            print(f"   Total: {len(cookies)}")
-            print(f"   Dominio unemi: {len(moodle_cookies)}")
-            print(f"   MoodleSession: {len(session_cookies)}")
-            print()
+        print(f"\n📊 Cookies guardadas: {len(cookies)} total, {len(unemi_cookies)} de unemi, {len(session_cookies)} MoodleSession")
 
-            if session_cookies:
-                print(f"✅ LISTO. Archivo guardado en: {session_path}")
-                print(f"📤 Súbelo a Render desde la web.")
-            else:
-                print("❌ No se encontró la cookie MoodleSession.")
-                print("   La sesión no es válida. Intenta de nuevo.")
-
-        except Exception:
-            print("❌ Tiempo de espera agotado (5 min). Ejecuta de nuevo.")
+        if session_cookies:
+            print(f"✅ Sesión válida guardada en: {session_path}")
+            print(f"📤 Súbela a Render desde la web → 'Subir session_state.json'")
+        else:
+            print("❌ No hay MoodleSession. La sesión no sirve.")
+            print("   Asegúrate de estar logueado en la pestaña que se abrió.")
 
         await browser.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

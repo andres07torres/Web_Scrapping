@@ -197,3 +197,30 @@ tbody tr.selected { background: #e3f2fd; }
 }
 
 .upload-label:hover { opacity: .8; }
+
+.help-box {
+  margin-top: 10px;
+  font-size: .85rem;
+  color: #555;
+  background: #fff3e0;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.help-box summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #e65100;
+}
+
+.help-box ol {
+  margin: 8px 0 4px 20px;
+  line-height: 1.8;
+}
+
+.help-box code {
+  background: #eee;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: .8rem;
+}
