@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: web-scrapping-tareas
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MOODLE_USERNAME
+        sync: false
+      - key: MOODLE_PASSWORD
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+    healthCheckPath: /health
+    plan: free

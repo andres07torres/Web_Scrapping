@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: web-scrapping-tareas
+    ports:
+      - "5000:5000"
+    environment:
+      - MOODLE_USERNAME=${MOODLE_USERNAME}
+      - MOODLE_PASSWORD=${MOODLE_PASSWORD}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-cambia-esto-en-produccion}
+    volumes:
+      - ./.env:/.env:ro
+      - ./data:/data

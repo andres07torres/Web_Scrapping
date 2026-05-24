@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Scrapping Tareas</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Web Scrapping Tareas</h1>
+    </header>
+
+    <section class="controls">
+      <div class="url-row">
+        <label for="url-input">URL Actividad:</label>
+        <input type="url" id="url-input" placeholder="https://aulagradob.unemi.edu.ec/..." autofocus>
+        <button id="scrape-btn" class="btn primary" onclick="scrape()">Extraer Tarea</button>
+        <button class="btn danger small" onclick="document.getElementById('url-input').value = ''">X</button>
+      </div>
+      <div class="options-row" id="options-row" style="display:none">
+        <label>
+          <input type="checkbox" id="headless" checked> Headless (sin ventana)
+        </label>
+        <input type="text" id="username" placeholder="Usuario (opcional)" autocomplete="off">
+        <input type="password" id="password" placeholder="Contraseña (opcional)" autocomplete="off">
+      </div>
+      <p id="status" class="status">Esperando URL...</p>
+    </section>
+
+    <section class="table-section">
+      <table id="tasks-table">
+        <thead>
+          <tr>
+            <th>TÍTULO</th>
+            <th>MATERIA</th>
+            <th>TIPO</th>
+            <th>APERTURA</th>
+            <th>ENTREGA</th>
+            <th>ACCIÓN</th>
+          </tr>
+        </thead>
+        <tbody id="tasks-body">
+          {% for task in tasks %}
+          <tr>
+            <td>{{ task.titulo }}</td>
+            <td>{{ task.materia }}</td>
+            <td><span class="badge badge-{{ task.tipo }}">{{ task.tipo }}</span></td>
+            <td>{{ task.fecha_apertura }}</td>
+            <td>{{ task.fecha_entrega }}</td>
+            <td><button class="btn danger small" onclick="deleteTask({{ loop.index0 }})">Eliminar</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p id="empty-msg" class="empty-msg" {% if tasks %}style="display:none"{% endif %}>No hay tareas extraídas aún.</p>
+    </section>
+
+    <footer class="actions">
+      <span id="count" class="count">{{ tasks|length }} tarea(s)</span>
+      <div>
+        <button class="btn danger" onclick="clearList()">Actualizar Lista</button>
+        <button class="btn warning" onclick="deleteSelected()">Eliminar Seleccionada</button>
+        <button class="btn success" onclick="exportCSV()">Exportar CSV</button>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    const CSRF_TOKEN = '{{ csrf_token }}';
+    let selectedIndex = -1;
+    let deleteMode = false;
+
+    document.getElementById('tasks-body').addEventListener('click', function(e) {
+      const row = e.target.closest('tr');
+      if (!row || e.target.tagName === 'BUTTON') return;
+      document.querySelectorAll('#tasks-body tr').forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
+      selectedIndex = Array.from(row.parentElement.children).indexOf(row);
+      deleteMode = true;
+    });
+
+    function getCSRFHeaders() {
+      return { 'X-CSRF-Token': CSRF_TOKEN };
+    }
+
+    async function scrape() {
+      const url = document.getElementById('url-input').value.trim();
+      if (!url) { setStatus('Ingresa una URL', 'error'); return; }
+
+      const btn = document.getElementById('scrape-btn');
+      btn.disabled = true;
+      btn.textContent = 'Extrayendo...';
+      setStatus('Procesando...', '');
+
+      const formData = new FormData();
+      formData.append('url', url);
+      formData.append('headless', document.getElementById('headless').checked);
+      formData.append('_csrf_token', CSRF_TOKEN);
+      const u = document.getElementById('username').value.trim();
+      const p = document.getElementById('password').value;
+      if (u) formData.append('username', u);
+      if (p) formData.append('password', p);
+
+      try {
+        const res = await fetch('/scrape', {
+          method: 'POST',
+          headers: getCSRFHeaders(),
+          body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) { setStatus(data.error, 'error'); return; }
+        addRow(data.task);
+        document.getElementById('count').textContent = data.count + ' tarea(s)';
+        setStatus('Tarea extraída correctamente', 'success');
+      } catch (err) {
+        setStatus('Error de conexión', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Extraer Tarea';
+      }
+    }
+
+    function addRow(task) {
+      const tbody = document.getElementById('tasks-body');
+      document.getElementById('empty-msg').style.display = 'none';
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + escHtml(task.titulo) + '</td>' +
+        '<td>' + escHtml(task.materia) + '</td>' +
+        '<td><span class="badge badge-' + escHtml(task.tipo) + '">' + escHtml(task.tipo) + '</span></td>' +
+        '<td>' + escHtml(task.fecha_apertura) + '</td>' +
+        '<td>' + escHtml(task.fecha_entrega) + '</td>' +
+        '<td><button class="btn danger small" onclick="deleteTask(' + tbody.children.length + ')">Eliminar</button></td>';
+      tbody.insertBefore(tr, tbody.firstChild);
+    }
+
+    function escHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+    }
+
+    async function deleteTask(index) {
+      const formData = new FormData();
+      formData.append('_csrf_token', CSRF_TOKEN);
+      const res = await fetch('/delete/' + index, {
+        method: 'POST',
+        headers: getCSRFHeaders(),
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) { setStatus(data.error, 'error'); return; }
+      location.reload();
+    }
+
+    function deleteSelected() {
+      if (selectedIndex < 0) { setStatus('Selecciona una tarea de la tabla', 'error'); return; }
+      deleteTask(selectedIndex);
+    }
+
+    async function clearList() {
+      if (!confirm('¿Eliminar todas las tareas de la lista?')) return;
+      const formData = new FormData();
+      formData.append('_csrf_token', CSRF_TOKEN);
+      const res = await fetch('/clear', {
+        method: 'POST',
+        headers: getCSRFHeaders(),
+        body: formData
+      });
+      await res.json();
+      location.reload();
+    }
+
+    function exportCSV() {
+      window.location.href = '/export';
+    }
+
+    function setStatus(msg, type) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status' + (type ? ' ' + type : '');
+    }
+
+    document.getElementById('url-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') scrape();
+    });
+  </script>
+</body>
+</html>
