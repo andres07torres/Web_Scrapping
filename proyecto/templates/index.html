@@ -85,7 +85,6 @@
   </div>
 
   <script>
-    const CSRF_TOKEN = '{{ csrf_token }}';
     let selectedIndex = -1;
     let deleteMode = false;
 
@@ -98,8 +97,14 @@
       deleteMode = true;
     });
 
-    function getCSRFHeaders() {
-      return { 'X-CSRF-Token': CSRF_TOKEN };
+    async function getToken() {
+      const res = await fetch('/csrf-token');
+      const data = await res.json();
+      return data.csrf_token;
+    }
+
+    async function getCSRFHeaders() {
+      return { 'X-CSRF-Token': await getToken() };
     }
 
     async function scrape() {
@@ -111,10 +116,11 @@
       btn.textContent = 'Extrayendo...';
       setStatus('Procesando...', '');
 
+      const token = await getToken();
       const formData = new FormData();
       formData.append('url', url);
       formData.append('headless', document.getElementById('headless').checked);
-      formData.append('_csrf_token', CSRF_TOKEN);
+      formData.append('_csrf_token', token);
       const u = document.getElementById('username').value.trim();
       const p = document.getElementById('password').value;
       if (u) formData.append('username', u);
@@ -123,7 +129,7 @@
       try {
         const res = await fetch('/scrape', {
           method: 'POST',
-          headers: getCSRFHeaders(),
+          headers: { 'X-CSRF-Token': token },
           body: formData
         });
         const data = await res.json();
@@ -164,11 +170,12 @@
     }
 
     async function deleteTask(index) {
+      const token = await getToken();
       const formData = new FormData();
-      formData.append('_csrf_token', CSRF_TOKEN);
+      formData.append('_csrf_token', token);
       const res = await fetch('/delete/' + index, {
         method: 'POST',
-        headers: getCSRFHeaders(),
+        headers: { 'X-CSRF-Token': token },
         body: formData
       });
       const data = await res.json();
@@ -183,11 +190,12 @@
 
     async function clearList() {
       if (!confirm('¿Eliminar todas las tareas de la lista?')) return;
+      const token = await getToken();
       const formData = new FormData();
-      formData.append('_csrf_token', CSRF_TOKEN);
+      formData.append('_csrf_token', token);
       const res = await fetch('/clear', {
         method: 'POST',
-        headers: getCSRFHeaders(),
+        headers: { 'X-CSRF-Token': token },
         body: formData
       });
       await res.json();
@@ -237,14 +245,15 @@
     async function uploadSession(input) {
       const file = input.files[0];
       if (!file) return;
+      const token = await getToken();
       const formData = new FormData();
       formData.append('session_file', file);
-      formData.append('_csrf_token', CSRF_TOKEN);
+      formData.append('_csrf_token', token);
       setStatus('Subiendo sesión...', '');
       try {
         const res = await fetch('/upload-session', {
           method: 'POST',
-          headers: getCSRFHeaders(),
+          headers: { 'X-CSRF-Token': token },
           body: formData
         });
         const data = await res.json();
@@ -258,11 +267,12 @@
     }
 
     async function deleteSession() {
+      const token = await getToken();
       const formData = new FormData();
-      formData.append('_csrf_token', CSRF_TOKEN);
+      formData.append('_csrf_token', token);
       const res = await fetch('/delete-session', {
         method: 'POST',
-        headers: getCSRFHeaders(),
+        headers: { 'X-CSRF-Token': token },
         body: formData
       });
       const data = await res.json();

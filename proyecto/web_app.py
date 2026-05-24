@@ -94,11 +94,6 @@ def add_security_headers(response):
     return response
 
 
-@app.context_processor
-def inject_csrf():
-    return dict(csrf_token=csrf_token())
-
-
 @app.route("/")
 def index():
     return render_template("index.html", tasks=session.get("tasks", []))
@@ -242,6 +237,11 @@ def delete_session():
         os.remove(SESSION_STATE_PATH)
         logger.info("Sesión eliminada por %s", request.remote_addr)
     return jsonify({"success": True, "message": "Sesión eliminada"})
+
+
+@app.route("/csrf-token")
+def get_csrf_token():
+    return jsonify({"csrf_token": csrf_token()})
 
 
 @app.route("/health")
