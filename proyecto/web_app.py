@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 import re
 import logging
@@ -45,7 +46,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=_IS_PRODUCTION,
-    MAX_CONTENT_LENGTH=1024 * 50,
+    MAX_CONTENT_LENGTH=1024 * 1024,
 )
 
 MAX_URL_LENGTH = 500
@@ -186,6 +187,44 @@ def export_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@app.route("/upload-session", methods=["POST"])
+@require_csrf
+def upload_session():
+    if "session_file" not in request.files:
+        return jsonify({"error": "No se envió ningún archivo"}), 400
+    file = request.files["session_file"]
+    if file.filename == "" or not file.filename.endswith(".json"):
+        return jsonify({"error": "Debe ser un archivo .json"}), 400
+    try:
+        content = file.read().decode("utf-8")
+        json.loads(content)
+        os.makedirs(os.path.dirname(SESSION_STATE_PATH), exist_ok=True)
+        with open(SESSION_STATE_PATH, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info("Sesión subida correctamente desde %s", request.remote_addr)
+        return jsonify({"success": True, "message": "Sesión cargada correctamente"})
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return jsonify({"error": "El archivo no es un JSON válido"}), 400
+
+
+@app.route("/session-status")
+def session_status():
+    exists = os.path.exists(SESSION_STATE_PATH)
+    return jsonify({
+        "has_session": exists,
+        "message": "Sesión activa" if exists else "No hay sesión guardada"
+    })
+
+
+@app.route("/delete-session", methods=["POST"])
+@require_csrf
+def delete_session():
+    if os.path.exists(SESSION_STATE_PATH):
+        os.remove(SESSION_STATE_PATH)
+        logger.info("Sesión eliminada por %s", request.remote_addr)
+    return jsonify({"success": True, "message": "Sesión eliminada"})
 
 
 @app.route("/health")

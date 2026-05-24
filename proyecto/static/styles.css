@@ -169,3 +169,31 @@ tbody tr.selected { background: #e3f2fd; }
   color: #666;
   font-weight: 600;
 }
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.session-badge {
+  font-size: .8rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.session-active { color: #2e7d32; background: #e8f5e9; }
+.session-inactive { color: #c62828; background: #fce4ec; }
+
+.upload-label {
+  font-size: .8rem;
+  color: #1976d2;
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.upload-label:hover { opacity: .8; }

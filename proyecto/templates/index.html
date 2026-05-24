@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Web Scrapping Tareas</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
   <div class="container">
@@ -27,6 +27,14 @@
         <input type="password" id="password" placeholder="Contraseña (opcional)" autocomplete="off">
       </div>
       <p id="status" class="status">Esperando URL...</p>
+      <div class="session-row">
+        <span id="session-badge" class="session-badge session-inactive">● Sin sesión</span>
+        <label class="upload-label" id="upload-label">
+          Subir session_state.json
+          <input type="file" id="session-input" accept=".json" hidden onchange="uploadSession(this)">
+        </label>
+        <button class="btn danger small" id="delete-session-btn" style="display:none" onclick="deleteSession()">Eliminar sesión</button>
+      </div>
     </section>
 
     <section class="table-section">
@@ -190,6 +198,69 @@
     document.getElementById('url-input').addEventListener('keydown', function(e) {
       if (e.key === 'Enter') scrape();
     });
+
+    checkSession();
+
+    async function checkSession() {
+      try {
+        const res = await fetch('/session-status');
+        const data = await res.json();
+        updateSessionUI(data.has_session);
+      } catch (e) {}
+    }
+
+    function updateSessionUI(hasSession) {
+      const badge = document.getElementById('session-badge');
+      const delBtn = document.getElementById('delete-session-btn');
+      if (hasSession) {
+        badge.className = 'session-badge session-active';
+        badge.textContent = '● Sesión activa';
+        delBtn.style.display = 'inline-block';
+        document.getElementById('upload-label').style.display = 'none';
+      } else {
+        badge.className = 'session-badge session-inactive';
+        badge.textContent = '● Sin sesión';
+        delBtn.style.display = 'none';
+        document.getElementById('upload-label').style.display = 'inline-block';
+      }
+    }
+
+    async function uploadSession(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('session_file', file);
+      formData.append('_csrf_token', CSRF_TOKEN);
+      setStatus('Subiendo sesión...', '');
+      try {
+        const res = await fetch('/upload-session', {
+          method: 'POST',
+          headers: getCSRFHeaders(),
+          body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) { setStatus(data.error, 'error'); return; }
+        updateSessionUI(true);
+        setStatus(data.message, 'success');
+      } catch (e) {
+        setStatus('Error al subir la sesión', 'error');
+      }
+      input.value = '';
+    }
+
+    async function deleteSession() {
+      const formData = new FormData();
+      formData.append('_csrf_token', CSRF_TOKEN);
+      const res = await fetch('/delete-session', {
+        method: 'POST',
+        headers: getCSRFHeaders(),
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) { setStatus(data.error, 'error'); return; }
+      updateSessionUI(false);
+      setStatus(data.message, 'success');
+    }
   </script>
 </body>
 </html>
