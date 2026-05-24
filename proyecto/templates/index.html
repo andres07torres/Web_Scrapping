@@ -35,6 +35,7 @@
           <input type="file" id="session-input" accept=".json" hidden onchange="uploadSession(this)">
         </label>
         <button class="btn danger small" id="delete-session-btn" style="display:none" onclick="deleteSession()">Eliminar sesión</button>
+        <button class="btn warning small" onclick="showManualForm()">+ Manual</button>
       </div>
     </section>
     <details class="help-box">
@@ -45,6 +46,24 @@
         <li>Sube el archivo <code>data/session_state.json</code> generado.</li>
       </ol>
     </details>
+
+    <div id="manual-modal" class="modal" style="display:none">
+      <div class="modal-content">
+        <span class="modal-close" onclick="closeManualForm()">&times;</span>
+        <h3>Agregar tarea manualmente</h3>
+        <label>Título</label>
+        <input type="text" id="m-titulo">
+        <label>Materia</label>
+        <input type="text" id="m-materia">
+        <label>Tipo</label>
+        <select id="m-tipo"><option value="tarea">Tarea</option><option value="test">Test</option><option value="foro">Foro</option></select>
+        <label>Fecha de apertura</label>
+        <input type="date" id="m-apertura">
+        <label>Fecha de entrega</label>
+        <input type="date" id="m-entrega">
+        <button class="btn primary" onclick="addManual()">Agregar</button>
+      </div>
+    </div>
 
     <section class="table-section">
       <table id="tasks-table">
@@ -280,6 +299,48 @@
       updateSessionUI(false);
       setStatus(data.message, 'success');
     }
+
+    function showManualForm() {
+      document.getElementById('manual-modal').style.display = 'block';
+    }
+
+    function closeManualForm() {
+      document.getElementById('manual-modal').style.display = 'none';
+    }
+
+    async function addManual() {
+      const titulo = document.getElementById('m-titulo').value.trim();
+      const materia = document.getElementById('m-materia').value.trim();
+      if (!titulo || !materia) { setStatus('Título y materia son requeridos', 'error'); return; }
+      const token = await getToken();
+      const formData = new FormData();
+      formData.append('titulo', titulo);
+      formData.append('materia', materia);
+      formData.append('tipo', document.getElementById('m-tipo').value);
+      formData.append('fecha_apertura', document.getElementById('m-apertura').value);
+      formData.append('fecha_entrega', document.getElementById('m-entrega').value);
+      formData.append('_csrf_token', token);
+      try {
+        const res = await fetch('/add-manual', {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': token },
+          body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) { setStatus(data.error, 'error'); return; }
+        addRow(data.task);
+        document.getElementById('count').textContent = data.count + ' tarea(s)';
+        closeManualForm();
+        setStatus('Tarea agregada', 'success');
+      } catch (e) {
+        setStatus('Error al agregar', 'error');
+      }
+    }
+
+    // Cerrar modal al hacer clic fuera
+    window.addEventListener('click', function(e) {
+      if (e.target === document.getElementById('manual-modal')) closeManualForm();
+    });
   </script>
 </body>
 </html>

@@ -50,10 +50,21 @@ app.config.update(
 )
 
 MAX_URL_LENGTH = 500
+API_KEY = os.getenv("API_KEY", "")
 
 
 def sanitize_html(text):
     return re.sub(r'<[^>]*>', '', text) if text else text
+
+
+def require_api_key(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = request.headers.get("X-API-Key") or request.form.get("api_key")
+        if not API_KEY or key != API_KEY:
+            return jsonify({"error": "API Key inválida"}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 def csrf_token():
@@ -237,6 +248,76 @@ def delete_session():
         os.remove(SESSION_STATE_PATH)
         logger.info("Sesión eliminada por %s", request.remote_addr)
     return jsonify({"success": True, "message": "Sesión eliminada"})
+
+
+@app.route("/add-manual", methods=["POST"])
+@require_csrf
+def add_manual():
+    titulo = sanitize_html(request.form.get("titulo", "").strip()[:200])
+    materia = sanitize_html(request.form.get("materia", "").strip()[:200])
+    tipo = request.form.get("tipo", "tarea")
+    if tipo not in ("tarea", "test", "foro"):
+        tipo = "tarea"
+    fecha_apertura = request.form.get("fecha_apertura", "").strip()
+    fecha_entrega = request.form.get("fecha_entrega", "").strip()
+
+    if not titulo or not materia:
+        return jsonify({"error": "Título y materia son requeridos"}), 400
+
+    task = {
+        "titulo": titulo,
+        "descripcion": "",
+        "fecha_entrega": fecha_entrega or datetime.now().strftime("%Y-%m-%d"),
+        "estado": "pendiente",
+        "materia": materia,
+        "tipo": tipo,
+        "fecha_apertura": fecha_apertura or datetime.now().strftime("%Y-%m-%d"),
+    }
+
+    session.permanent = True
+    tasks = session.get("tasks", [])
+    tasks.insert(0, task)
+    max_tasks = int(os.getenv("MAX_TASKS_PER_SESSION", "50"))
+    session["tasks"] = tasks[:max_tasks]
+
+    return jsonify({"task": task, "count": len(session["tasks"])})
+
+
+@app.route("/api/tasks", methods=["POST"])
+@require_api_key
+def api_add_tasks():
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, list):
+        return jsonify({"error": "Enviar un array JSON de tareas"}), 400
+
+    valid_types = ("tarea", "test", "foro")
+    added = 0
+    session.permanent = True
+    tasks = session.get("tasks", [])
+    max_tasks = int(os.getenv("MAX_TASKS_PER_SESSION", "50"))
+
+    for item in data:
+        titulo = sanitize_html(str(item.get("titulo", ""))[:200])
+        materia = sanitize_html(str(item.get("materia", ""))[:200])
+        tipo = item.get("tipo", "tarea")
+        if tipo not in valid_types:
+            tipo = "tarea"
+        if not titulo or not materia:
+            continue
+        tasks.insert(0, {
+            "titulo": titulo,
+            "descripcion": "",
+            "fecha_entrega": str(item.get("fecha_entrega", "") or datetime.now().strftime("%Y-%m-%d")),
+            "estado": "pendiente",
+            "materia": materia,
+            "tipo": tipo,
+            "fecha_apertura": str(item.get("fecha_apertura", "") or datetime.now().strftime("%Y-%m-%d")),
+        })
+        added += 1
+
+    session["tasks"] = tasks[:max_tasks]
+    logger.info("API: %d tareas recibidas desde %s", added, request.remote_addr)
+    return jsonify({"success": True, "added": added, "total": len(session["tasks"])})
 
 
 @app.route("/csrf-token")
