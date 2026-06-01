@@ -31,7 +31,7 @@ Aplicación web para automatizar la extracción de actividades, tareas y evaluac
 - **Headers de seguridad** — CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy y Permissions-Policy.
 - **Protección CSRF** — Token único por sesión validado en todas las rutas POST.
 - **Sesión segura** — Cookies HTTP-only, SameSite=Lax, timeout de 2 horas.
-- **Validación de URLs** — Solo se permite el dominio `aulagradob.unemi.edu.ec` con prefijo HTTPS.
+- **Validación de URLs** — Se permiten los dominios `aulagradob.unemi.edu.ec` y `aulagrado.unemi.edu.ec` con prefijo HTTPS.
 - **Sanitización de entrada** — Se elimina HTML/scripts de todos los inputs del usuario.
 - **Sanitización de salida** — Escape de caracteres HTML en el frontend para prevenir XSS.
 - **Playwright seguro** — Navegador lanzado con `--no-sandbox`, `--disable-dev-shm-usage`, user-agent fijo y timeouts acotados.

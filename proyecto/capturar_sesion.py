@@ -13,18 +13,21 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 async def main():
     print("=" * 60)
-    print("Capturador de sesi\u00f3n Moodle")
+    print("Capturador de sesión Moodle - Aula Grado B")
     print("=" * 60)
-    print("Se abrir\u00e1 una ventana del navegador.")
-    print("1. Inicia sesi\u00f3n MANUALMENTE (resuelve el CAPTCHA si aparece)")
-    print("2. Despu\u00e9s de entrar, vuelve a esta terminal y presiona ENTER")
-    print("3. Las cookies se guardar\u00e1n autom\u00e1ticamente")
+    print("Se abrirá una ventana del navegador de Aula Grado B.")
+    print("1. Inicia sesión MANUALMENTE (resuelve el CAPTCHA si aparece)")
+    print("2. Después de entrar, vuelve a esta terminal y presiona ENTER")
+    print("3. Las cookies se guardarán automáticamente")
     print("=" * 60)
+
+    login_url = "https://aulagradob.unemi.edu.ec/login/index.php"
+    session_path = os.path.join(DATA_DIR, 'session_state_aulagradob.json')
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
-            args=["--no-sandbox"],
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
         )
         context = await browser.new_context(
             no_viewport=True,
@@ -35,17 +38,18 @@ async def main():
             ),
         )
         page = await context.new_page()
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         await page.goto(
-            "https://aulagradob.unemi.edu.ec/login/index.php",
+            login_url,
             wait_until="networkidle"
         )
 
-        input("Presiona ENTER despu\u00e9s de iniciar sesi\u00f3n... ")
+        input("\nPresiona ENTER después de iniciar sesión... ")
 
-        await context.storage_state(path=SESSION_PATH)
+        await context.storage_state(path=session_path)
         await browser.close()
 
-    print("\u2705 Sesion guardada correctamente.")
+    print("\n✅ Sesión de Aula Grado B guardada correctamente.")
 
 
 if __name__ == "__main__":

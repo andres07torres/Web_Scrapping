@@ -10,13 +10,45 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from src.scraper import run_scrape, validate_url
+from src.scraper import run_scrape, validate_url, cleanup_scraper, clean_session_file
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data')
-SESSION_PATH = os.path.join(DATA_DIR, 'session_state.json')
 os.makedirs(DATA_DIR, exist_ok=True)
+
+def get_session_path(url_or_domain):
+    if not url_or_domain:
+        return os.path.join(DATA_DIR, 'session_state_aulagradob.json') # Default fallback
+    
+    if "://" in url_or_domain:
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url_or_domain)
+            domain = parsed.netloc.lower()
+        except Exception:
+            domain = "aulagradob.unemi.edu.ec"
+    else:
+        domain = url_or_domain.lower()
+        
+    if "aulagrado.unemi.edu.ec" in domain:
+        return os.path.join(DATA_DIR, 'session_state_aulagrado.json')
+    else:
+        return os.path.join(DATA_DIR, 'session_state_aulagradob.json')
+
+# Migrate old session file if exists to the new domain-specific format
+old_session_path = os.path.join(DATA_DIR, 'session_state.json')
+new_session_path = os.path.join(DATA_DIR, 'session_state_aulagradob.json')
+if os.path.exists(old_session_path) and not os.path.exists(new_session_path):
+    try:
+        import shutil
+        shutil.copy(old_session_path, new_session_path)
+    except Exception:
+        pass
+
+# Clean both session files on startup
+clean_session_file(os.path.join(DATA_DIR, 'session_state_aulagrado.json'))
+clean_session_file(os.path.join(DATA_DIR, 'session_state_aulagradob.json'))
 
 COLORS = {
     "bg": "#f0f2f5",
@@ -133,13 +165,14 @@ class ScrapingApp:
         self.url_entry = ttk.Entry(url_frame, font=("Segoe UI", 10))
         self.url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
         self.url_entry.bind("<Return>", lambda e: self._scrape())
-        clear_btn = tk.Button(url_frame, text="\u2715",
+        self.url_entry.bind("<KeyRelease>", lambda e: self._update_session_indicator())
+        clear_btn = tk.Button(url_frame, text="✕",
                               font=("Segoe UI", 9),
                               bg=COLORS["card"], fg=COLORS["text_secondary"],
                               relief="flat", bd=0, padx=4, pady=0,
                               activebackground=COLORS["bg"],
                               cursor="hand2",
-                              command=lambda: self.url_entry.delete(0, tk.END))
+                              command=lambda: [self.url_entry.delete(0, tk.END), self._update_session_indicator()])
         clear_btn.pack(side=tk.LEFT, padx=(0, 4))
         self.scrape_btn = ttk.Button(url_frame, text="\u25b6 Scrapear",
                                      style="Accent.TButton",
@@ -342,8 +375,8 @@ class ScrapingApp:
                                    "Ingresa una URL de Moodle")
             return
         if not validate_url(url):
-            messagebox.showwarning("URL inv\u00e1lida",
-                                   "Debe ser una URL de aulagradob.unemi.edu.ec valida")
+            messagebox.showwarning("URL inválida",
+                                   "Debe ser una URL de aulagradob.unemi.edu.ec o aulagrado.unemi.edu.ec valida")
             return
         self.scraping = True
         self.scrape_btn.config(state=tk.DISABLED, text="\u23f3 Scrapeando...")
@@ -358,10 +391,19 @@ class ScrapingApp:
                 username=os.getenv("MOODLE_USERNAME"),
                 password=os.getenv("MOODLE_PASSWORD"),
                 headless=True,
-                storage_path=SESSION_PATH,
+                storage_path=get_session_path(url),
             )
             self.root.after(0, self._on_scrape_done, task, url)
         except Exception as e:
+            import traceback, time
+            tb = traceback.format_exc()
+            print("--- SCRAPING ERROR ---")
+            print(tb)
+            try:
+                with open(os.path.join(DATA_DIR, "app_error.log"), "a", encoding="utf-8") as f:
+                    f.write(f"\n[{time.ctime()}] URL: {url}\n{tb}\n")
+            except Exception:
+                pass
             self.root.after(0, self._on_scrape_error, str(e), url)
 
     def _on_scrape_done(self, task, url):
@@ -381,150 +423,194 @@ class ScrapingApp:
     def _on_scrape_error(self, error_msg, url=None):
         self._stop_progress()
         self.scraping = False
-        self.scrape_btn.config(state=tk.NORMAL, text="\u25b6 Scrapear")
+        self.scrape_btn.config(state=tk.NORMAL, text="▶ Scrapear")
         safe_msg = error_msg[:_MAX_ERROR_LEN] if error_msg else "Error desconocido"
-        self.status_var.set(f"\u274c {safe_msg}")
-        if "CAPTCHA" in error_msg:
+        self.status_var.set(f"❌ {safe_msg}")
+        is_login_error = any(kw in error_msg.lower() for kw in [
+            "captcha", "expired", "inicio de sesión", 
+            "sesión", "sesion", "login", "contraseña", "credenciales"
+        ])
+        
+        if is_login_error:
             retry = messagebox.askyesno(
-                "CAPTCHA detectado",
-                "Moodle pide CAPTCHA.\n\n"
-                "\u00bfQuieres abrir el navegador para iniciar sesi\u00f3n\n"
-                "manualmente? Despu\u00e9s el scraping continuar\u00e1 solo.")
+                "Sesión requerida o expirada",
+                "Se detectó que la sesión ha expirado o es necesario iniciar sesión.\n\n"
+                "¿Quieres abrir el navegador para iniciar sesión manualmente y actualizar tu sesión?")
             if retry and url:
                 self._capture_session_and_retry(url)
         else:
             messagebox.showerror("Error", safe_msg)
 
     def _capture_session_and_retry(self, url):
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        self._capture_session_flow(base_url, target_url_to_retry=url)
+
+    def _capture_session_flow(self, base_url, target_url_to_retry=None):
         self.status_var.set("Abriendo navegador para login manual...")
-        self.scrape_btn.config(state=tk.DISABLED, text="\u23f3 Login...")
-        self._pending_url = url
-        threading.Thread(target=self._do_capture_session,
-                         daemon=True).start()
+        self.scrape_btn.config(state=tk.DISABLED, text="⏳ Login...")
+        
+        is_cancelled = False
+        
+        def cancel_action():
+            nonlocal is_cancelled
+            is_cancelled = True
+            self.status_var.set("❌ Login cancelado")
+            self.scrape_btn.config(state=tk.NORMAL, text="▶ Scrapear")
 
-    def _do_capture_session(self):
-        async def run():
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=False,
-                    args=["--no-sandbox"],
-                )
-                context = await browser.new_context(
-                    no_viewport=True,
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/125.0.0.0 Safari/537.36"
-                    ),
-                )
-                page = await context.new_page()
-                await page.goto(
-                    "https://aulagradob.unemi.edu.ec/login/index.php",
-                    wait_until="networkidle"
-                )
-                return context, browser, page
+        waiting_win = self._show_waiting_window(cancel_action)
+        
+        def run_thread():
+            async def run():
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(
+                        headless=False,
+                        args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                    )
+                    context = await browser.new_context(
+                        no_viewport=True,
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/125.0.0.0 Safari/537.36"
+                        ),
+                    )
+                    page = await context.new_page()
+                    await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                    login_url = f"{base_url}/login/index.php"
+                    await page.goto(login_url, wait_until="domcontentloaded")
+                    
+                    success = False
+                    for _ in range(360):  # Max 3 minutes
+                        if is_cancelled or not browser.is_connected():
+                            break
+                        try:
+                            is_login_page = "login/index.php" in page.url
+                            is_logged = (not is_login_page) and (await page.locator("a[href*='login/logout.php'], img.userpicture").count() > 0)
+                            if is_logged:
+                                await page.wait_for_timeout(2000)  # Wait for cookies to settle
+                                await context.storage_state(path=get_session_path(base_url))
+                                success = True
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(0.5)
+                        
+                    await browser.close()
+                    return success
 
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                success = loop.run_until_complete(run())
+                loop.close()
+                
+                self.root.after(0, lambda: self._on_capture_flow_done(success, target_url_to_retry, waiting_win))
+            except Exception as e:
+                self.root.after(0, lambda: self._on_capture_flow_error(str(e), waiting_win))
+
+        threading.Thread(target=run_thread, daemon=True).start()
+
+    def _show_waiting_window(self, cancel_callback):
+        win = tk.Toplevel(self.root)
+        win.title("Esperando inicio de sesión")
+        win.geometry("400x180")
+        win.configure(bg=COLORS["card"])
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+        
+        rx = self.root.winfo_x()
+        ry = self.root.winfo_y()
+        rw = self.root.winfo_width()
+        rh = self.root.winfo_height()
+        win.geometry(f"+{rx + (rw - 400)//2}+{ry + (rh - 180)//2}")
+        
+        tk.Label(win, text="Inicio de sesión requerido", font=("Segoe UI", 12, "bold"),
+                 bg=COLORS["card"], fg=COLORS["text"]).pack(pady=(15, 10))
+        
+        lbl = tk.Label(win, text="Inicia sesión en la ventana del navegador que se abrió.\nEsta ventana se cerrará sola cuando tengas éxito.",
+                       font=("Segoe UI", 9), bg=COLORS["card"], fg=COLORS["text_secondary"], justify="center")
+        lbl.pack(pady=(0, 10))
+        
+        pb = ttk.Progressbar(win, mode="indeterminate", length=250)
+        pb.pack(pady=5)
+        pb.start(10)
+        
+        btn = tk.Button(win, text="Cancelar", command=lambda: [cancel_callback(), win.destroy()],
+                        font=("Segoe UI", 9), bg=COLORS["danger"], fg="#ffffff", relief="flat", padx=15, pady=3, cursor="hand2")
+        btn.pack(pady=10)
+        
+        win.protocol("WM_DELETE_WINDOW", lambda: [cancel_callback(), win.destroy()])
+        return win
+
+    def _on_capture_flow_done(self, success, target_url_to_retry, waiting_win):
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            context, browser, _ = loop.run_until_complete(run())
-            loop.close()
-        except Exception as e:
-            self.root.after(0, self._on_capture_failed, str(e))
-            return
+            waiting_win.destroy()
+        except Exception:
+            pass
+            
+        self.scrape_btn.config(state=tk.NORMAL, text="▶ Scrapear")
+        self._update_session_indicator()
+        
+        if success:
+            if target_url_to_retry:
+                self.status_var.set("✅ Sesión guardada. Reintentando scrape...")
+                self._do_scrape(target_url_to_retry)
+            else:
+                self.status_var.set("✅ Sesión renovada exitosamente")
+                messagebox.showinfo("Sesión guardada", "¡Sesión guardada correctamente! Ya puedes scrapear tus tareas.")
+        else:
+            self.status_var.set("❌ No se pudo guardar la sesión o se canceló")
 
-        self.root.after(0, lambda: self._wait_for_login(context, browser))
-
-    def _wait_for_login(self, context, browser):
-        messagebox.showinfo(
-            "Inicia sesi\u00f3n",
-            "Se abri\u00f3 el navegador de Moodle.\n\n"
-            "1. Inicia sesi\u00f3n manualmente (resuelve el CAPTCHA si aparece)\n"
-            "2. Cuando est\u00e9s dentro, presiona Aceptar\n\n"
-            "La sesi\u00f3n se guardar\u00e1 y el scraping continuar\u00e1 solo.")
-        self.status_var.set("Guardando sesi\u00f3n...")
-        threading.Thread(target=self._finish_capture,
-                         args=(context, browser), daemon=True).start()
-
-    def _finish_capture(self, context, browser):
+    def _on_capture_flow_error(self, error_msg, waiting_win):
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(context.storage_state(path=SESSION_PATH))
-            loop.run_until_complete(browser.close())
-            loop.close()
-            self.root.after(0, lambda: self.status_var.set(
-                "\u2705 Sesion guardada. Reintentando scrape..."))
-            self.root.after(0, self._update_session_indicator)
-            self.root.after(0, lambda: self._do_scrape(self._pending_url))
-        except Exception as e:
-            self.root.after(0, self._on_capture_failed, str(e))
+            waiting_win.destroy()
+        except Exception:
+            pass
+        self.scrape_btn.config(state=tk.NORMAL, text="▶ Scrapear")
+        self._on_capture_failed(error_msg)
 
     def _on_capture_failed(self, error_msg):
         self.scraping = False
-        self.scrape_btn.config(state=tk.NORMAL, text="\u25b6 Scrapear")
+        self.scrape_btn.config(state=tk.NORMAL, text="▶ Scrapear")
         safe_msg = error_msg[:_MAX_ERROR_LEN] if error_msg else "Error desconocido"
-        self.status_var.set(f"\u274c {safe_msg}")
-        messagebox.showerror("Error", f"No se pudo capturar la sesi\u00f3n:\n{safe_msg}")
+        self.status_var.set(f"❌ {safe_msg}")
+        messagebox.showerror("Error", f"No se pudo capturar la sesión:\n{safe_msg}")
 
     def _update_session_indicator(self):
-        color = COLORS["success"] if os.path.exists(SESSION_PATH) else COLORS["danger"]
+        url = self.url_entry.get().strip()
+        session_path = get_session_path(url)
+        color = COLORS["success"] if os.path.exists(session_path) else COLORS["danger"]
         self._session_indicator.itemconfig(self._session_dot, fill=color)
+
+    def _clear_session(self):
+        try:
+            url = self.url_entry.get().strip()
+            session_path = get_session_path(url)
+            if os.path.exists(session_path):
+                os.remove(session_path)
+            self._update_session_indicator()
+            self.status_var.set("Sesión anterior eliminada")
+        except Exception:
+            pass
 
     def _renovar_sesion(self):
         if self.scraping:
             return
-        self.status_var.set("Abriendo navegador para login manual...")
-        self.scrape_btn.config(state=tk.DISABLED, text="\u23f3 Login...")
-        threading.Thread(target=self._do_capture_session_manual,
-                         daemon=True).start()
-
-    def _do_capture_session_manual(self):
-        async def run():
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=False, args=["--no-sandbox"])
-                context = await browser.new_context(
-                    no_viewport=True,
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/125.0.0.0 Safari/537.36"))
-                page = await context.new_page()
-                await page.goto(
-                    "https://aulagradob.unemi.edu.ec/login/index.php",
-                    wait_until="networkidle")
-                return context, browser, page
-
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            context, browser, _ = loop.run_until_complete(run())
-            loop.close()
-        except Exception as e:
-            self.root.after(0, self._on_capture_failed, str(e))
-            return
-
-        messagebox.showinfo(
-            "Inicia sesi\u00f3n",
-            "Se abri\u00f3 el navegador de Moodle.\n\n"
-            "1. Inicia sesi\u00f3n manualmente\n"
-            "2. Cuando est\u00e9s dentro, presiona Aceptar\n\n"
-            "La sesi\u00f3n se guardar\u00e1 autom\u00e1ticamente.")
-
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(context.storage_state(path=SESSION_PATH))
-            loop.run_until_complete(browser.close())
-            loop.close()
-            self.root.after(0, lambda: self.status_var.set(
-                "\u2705 Sesion renovada exitosamente"))
-            self.root.after(0, self._update_session_indicator)
-            self.root.after(0, lambda: self.scrape_btn.config(
-                state=tk.NORMAL, text="\u25b6 Scrapear"))
-        except Exception as e:
-            self.root.after(0, self._on_capture_failed, str(e))
+        
+        # Check current URL in the input field to choose the correct domain
+        url = self.url_entry.get().strip()
+        if url and validate_url(url):
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+        else:
+            base_url = "https://aulagradob.unemi.edu.ec"  # Default fallback
+            
+        self._clear_session()
+        self._capture_session_flow(base_url)
 
     def _stop_progress(self):
         self._hide_progress()
@@ -574,16 +660,20 @@ class ScrapingApp:
                     username=os.getenv("MOODLE_USERNAME"),
                     password=os.getenv("MOODLE_PASSWORD"),
                     headless=True,
-                    storage_path=SESSION_PATH,
+                    storage_path=get_session_path(url),
                 )
                 if task:
                     task["url_original"] = url
                     self.tasks[idx] = task
                     self._actualizar_ok += 1
             except Exception as e:
-                if "CAPTCHA" in str(e):
-                    self.root.after(0, lambda u=url: self._on_scrape_error(
-                        "CAPTCHA detectado", u))
+                err_msg = str(e)
+                is_login_err = any(kw in err_msg.lower() for kw in [
+                    "captcha", "expired", "inicio de sesión", 
+                    "sesión", "sesion", "login", "contraseña", "credenciales"
+                ])
+                if is_login_err:
+                    self.root.after(0, lambda u=url, m=err_msg: self._on_scrape_error(m, u))
                     return
         self.root.after(0, self._on_actualizar_done)
 
@@ -703,7 +793,8 @@ class ScrapingApp:
                     "titulo", "descripcion", "fecha_entrega",
                     "estado", "materia", "tipo", "fecha_apertura"]
                 writer = csv.DictWriter(f, fieldnames=cols,
-                                        delimiter=";")
+                                        delimiter=";",
+                                        extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(self.tasks)
             self.status_var.set(f"\u2705 CSV exportado: {os.path.basename(path)}")
@@ -740,6 +831,7 @@ class ScrapingApp:
 
     def _quit(self):
         if messagebox.askokcancel("Salir", "\u00bfDeseas salir de la aplicaci\u00f3n?"):
+            cleanup_scraper()
             try:
                 self.root.destroy()
             except Exception:
