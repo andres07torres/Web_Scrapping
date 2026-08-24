@@ -23,22 +23,38 @@ def _validate_url_strict(url):
 def format_to_sql_date(date_str):
     if not date_str or date_str == "N/A":
         return datetime.now().strftime("%Y-%m-%d")
-    meses = {
-        "enero": "01", "febrero": "02", "marzo": "03", "abril": "04",
-        "mayo": "05", "junio": "06", "julio": "07", "agosto": "08",
-        "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"
+    
+    # Using lists of regex patterns to match full and short month names securely
+    meses_patterns = {
+        "01": r"\b(enero|january|ene|jan)\b",
+        "02": r"\b(febrero|february|feb)\b",
+        "03": r"\b(marzo|march|mar)\b",
+        "04": r"\b(abril|april|abr|apr)\b",
+        "05": r"\b(mayo|may)\b",
+        "06": r"\b(junio|june|jun)\b",
+        "07": r"\b(julio|july|jul)\b",
+        "08": r"\b(agosto|august|ago|aug)\b",
+        "09": r"\b(septiembre|september|sep)\b",
+        "10": r"\b(octubre|october|oct)\b",
+        "11": r"\b(noviembre|november|nov)\b",
+        "12": r"\b(diciembre|december|dic|dec)\b"
     }
+    
     try:
         date_lower = date_str.lower()
         year_match = re.search(r"\d{4}", date_str)
         year = year_match.group(0) if year_match else str(datetime.now().year)
+        
+        # Day is typically 1 or 2 digits not starting with year. We can extract all numbers.
         day_matches = re.findall(r"\b\d{1,2}\b", date_str)
         day = day_matches[0].zfill(2) if day_matches else "01"
+        
         month = "01"
-        for m_name, m_num in meses.items():
-            if m_name in date_lower:
+        for m_num, m_regex in meses_patterns.items():
+            if re.search(m_regex, date_lower):
                 month = m_num
                 break
+                
         return f"{year}-{month}-{day}"
     except Exception:
         return datetime.now().strftime("%Y-%m-%d")
@@ -185,8 +201,11 @@ async def scrape_task(target_url, username, password, headless=True, storage_pat
         title = "Sin título"
         try:
             selectors = [
+                ".page-header-headings h1",
                 ".page-header-headings h2",
+                "#region-main h1",
                 "#region-main h2",
+                "h1",
                 "h2.h2",
                 "h2"
             ]
@@ -194,11 +213,14 @@ async def scrape_task(target_url, username, password, headless=True, storage_pat
                 element = page.locator(selector).first
                 if await element.is_visible():
                     text = await element.inner_text()
-                    if text.strip() and "Bloques" not in text and "Navegación" not in text:
+                    # Ignore common sidebar/accessibility headings in both ES and EN
+                    if text.strip() and not any(x in text for x in ["Bloques", "Blocks", "Navegación", "Navigation"]):
                         title = text.strip()
+                        # Some Moodle themes prefix the title with the activity type for screen readers
+                        # (e.g., "Assignment S5-TRABAJO..."). Let's try to keep it as is, or remove common prefixes if needed.
                         break
 
-            if title == "Sin título" or "Entrar" in title or "Grado B" in title:
+            if title == "Sin título" or "Entrar" in title or "Grado B" in title or "Blocks" in title:
                 page_title = await page.title()
                 title = page_title.split("|")[0].split(":")[-1].strip()
         except Exception:
@@ -230,13 +252,13 @@ async def scrape_task(target_url, username, password, headless=True, storage_pat
 
         if text:
             ap_patterns = [
-                r"(?:Apertura|Abri[oó]|Abre|Abierto|Disponible desde|Desde el)\s*(?:el|desde)?\s*[:\-]?\s*([^.]{10,100}?\d{2}:\d{2})",
-                r"Este cuestionario no estar[aá] disponible hasta el\s*([^.]{10,100}?\d{2}:\d{2})",
-                r"Este cuestionario se abri[oó] el\s*([^.]{10,100}?\d{2}:\d{2})"
+                r"(?:Apertura|Abri[oó]|Abre|Abierto|Disponible desde|Desde el|Opens|Opened|Available from|Available|Open)\s*(?:el|desde|on|at|from)?\s*[:\-]?\s*([\s\S]{3,150}?\d{1,2}:\d{2}(?:\s*(?:A\.?M\.?|P\.?M\.?|a\.?m\.?|p\.?m\.?))?)",
+                r"cuestionario no estar[aá] disponible hasta el\s*([\s\S]{3,150}?\d{1,2}:\d{2})",
+                r"cuestionario se abri[oó] el\s*([\s\S]{3,150}?\d{1,2}:\d{2})"
             ]
             ci_patterns = [
-                r"(?:Cierre|Cierra|Vencimiento|Fecha de entrega|Hasta el|Vence el)\s*(?:el|hasta)?\s*[:\-]?\s*([^.]{10,100}?\d{2}:\d{2})",
-                r"Este cuestionario se cerrar[aá] el\s*([^.]{10,100}?\d{2}:\d{2})"
+                r"(?:Cierre|Cierra|Cerrar|Vencimiento|Fecha de entrega|Fecha l[ií]mite|Hasta el|Vence el|Due date|Due|Closes|Closed|Close|Cut-off date|Cut-off)\s*(?:el|hasta|on|at)?\s*[:\-]?\s*([\s\S]{3,150}?\d{1,2}:\d{2}(?:\s*(?:A\.?M\.?|P\.?M\.?|a\.?m\.?|p\.?m\.?))?)",
+                r"cuestionario se cerrar[aá] el\s*([\s\S]{3,150}?\d{1,2}:\d{2})"
             ]
             for p_in in ap_patterns:
                 match = re.search(p_in, text, re.IGNORECASE)
